@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { EmService } from '../services/EmInfoService';
+import { TushareInfoService } from '../services/TushareInfoService';
 import { CacheService } from '../services/CacheService';
 import {
     STOCK_INFO_CACHE_TTL_SECONDS,
@@ -11,7 +11,6 @@ import {
 import { createResponse } from '../utils/response';
 import { formatToChinaTime } from '../utils/datetime';
 import { isValidAShareSymbol } from '../utils/validator';
-import { getStockIdentity } from '../utils/stock';
 import pool from '../db';
 
 const MAX_SYMBOLS = 20;
@@ -105,14 +104,12 @@ export class StockInfoController {
         return enriched;
     }
 
-    private static getSourceBySymbol(symbol: string): string {
-        const { eastmoneyId } = getStockIdentity(symbol);
-        const prefix = eastmoneyId === 1 ? 'sh' : 'sz';
-        return `东方财富 http://quote.eastmoney.com/concept/${prefix}${symbol}.html?from=classic`;
+    private static getSourceBySymbol(_symbol: string): string {
+        return `Tushare https://tushare.pro/document/2?doc_id=25`;
     }
 
     private static async fetchAndMaybeCache(symbol: string): Promise<Record<string, any>> {
-        const data = await EmService.getStockInfo(symbol);
+        const data = await TushareInfoService.getStockInfo(symbol);
 
         if (Object.keys(data).length > 0) {
             try {
@@ -192,7 +189,7 @@ export class StockInfoController {
             const now = Date.now();
 
             createResponse(res, 200, allFromCache ? 'success (cached)' : 'success', {
-                '来源': '东方财富',
+                '来源': 'Tushare',
                 '更新时间': formatToChinaTime(now),
                 '股票数量': results.length,
                 '股票信息': results,

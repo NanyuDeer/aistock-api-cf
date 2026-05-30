@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { EmQuoteService, QuoteLevel } from '../services/EmQuoteService';
-import { EmKlineService, KLineFqt, KLinePeriod } from '../services/EmKlineService';
+import { TushareQuoteService, QuoteLevel } from '../services/TushareQuoteService';
+import { TushareKlineService, KLineFqt, KLinePeriod } from '../services/TushareKlineService';
 import { CacheService } from '../services/CacheService';
 import { createResponse } from '../utils/response';
 import { isValidAShareSymbol } from '../utils/validator';
@@ -132,7 +132,7 @@ export class StockQuoteController {
             }
 
             if (missedSymbols.length > 0) {
-                const fetchedQuotes = await EmQuoteService.getBatchQuotes(missedSymbols, level);
+                const fetchedQuotes = await TushareQuoteService.getBatchQuotes(missedSymbols, level);
                 const cacheableFetchedCount = fetchedQuotes.filter(quote => this.isCacheableQuote(quote)).length;
                 const cacheTtlSeconds = cacheableFetchedCount > 0 && cacheConfig
                     ? await getAShareAdaptiveCacheTtlSeconds(cacheConfig.tradingTtlSeconds)
@@ -154,7 +154,7 @@ export class StockQuoteController {
             const message = missedSymbols.length === 0 ? 'success (cached)' : 'success';
 
             createResponse(res, 200, message, {
-                '来源': '东方财富',
+                '来源': 'Tushare',
                 '股票数量': results.length,
                 '行情': results,
             });
@@ -238,14 +238,14 @@ export class StockQuoteController {
         }
 
         try {
-            const klines = await EmKlineService.getKLine({
+            const klines = await TushareKlineService.getKLine({
                 symbol, klt, fqt, limit,
                 startDate: startDate || undefined,
                 endDate: endDate || undefined,
             });
 
             createResponse(res, 200, 'success', {
-                '来源': '东方财富',
+                '来源': 'Tushare',
                 '股票代码': symbol,
                 'K线周期': this.getKLinePeriodName(klt),
                 '复权类型': this.getFqtName(fqt),

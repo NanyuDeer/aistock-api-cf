@@ -18,7 +18,7 @@ interface TushareResponse {
     };
 }
 
-async function tushareRequest(
+export async function tushareRequest(
     apiName: string,
     params: Record<string, any>,
 ): Promise<Record<string, any>[]> {
@@ -217,7 +217,7 @@ export async function getIndexMember(indexCode: string): Promise<string[]> {
 export interface IndexDailyRow {
     ts_code: string; trade_date: string; close: number;
     pre_close: number; change: number; pct_chg: number;
-    vol: number; amount: number;
+    vol: number; amount: number; open: number; high: number; low: number;
 }
 
 export async function getIndexDaily(indexCode: string, startDate: string): Promise<IndexDailyRow[]> {

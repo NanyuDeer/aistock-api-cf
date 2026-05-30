@@ -1,10 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import { getStockIdentity } from '../utils/stock';
-import { formatToChinaTime } from '../utils/datetime';
 import { createResponse } from '../utils/response';
 import { isValidAShareSymbol, isValidGlobalIndexSymbol } from '../utils/validator';
 import { CacheService } from '../services/CacheService';
-import { eastmoneyThrottler } from '../utils/throttlers';
+import { getIndexDaily } from '../services/TushareService';
 import {
     INDEX_QUOTE_CACHE_KEY_PREFIX,
     buildTimestampedCachePayload,
@@ -14,71 +12,145 @@ import {
 import { getAShareIndexCacheTtlSeconds } from '../utils/tradingTime';
 
 const MAX_SYMBOLS = 20;
-const INDEX_FIELDS = 'f57,f58,f43,f44,f45,f46,f47,f48,f60,f170,f169,f168,f296,f86';
 
-const FIELD_NAME_MAP: Record<string, string> = {
-    'f57': '指数代码', 'f58': '指数简称', 'f43': '最新价', 'f44': '最高价',
-    'f45': '最低价', 'f46': '今开价', 'f47': '成交量', 'f48': '成交额',
-    'f60': '昨收价', 'f170': '涨跌幅', 'f169': '涨跌额', 'f168': '换手率',
-    'f296': '成交笔数', 'f86': '更新时间',
+const A_SHARE_INDEX_MAP: Record<string, string> = {
+    '000001': '000001.SH',
+    '000002': '000002.SH',
+    '000003': '000003.SH',
+    '000004': '000004.SH',
+    '000005': '000005.SH',
+    '399001': '399001.SZ',
+    '399002': '399002.SZ',
+    '399003': '399003.SZ',
+    '399004': '399004.SZ',
+    '399005': '399005.SZ',
+    '399006': '399006.SZ',
+    '399007': '399007.SZ',
+    '399008': '399008.SZ',
+    '399009': '399009.SZ',
+    '399010': '399010.SZ',
+    '399011': '399011.SZ',
+    '399012': '399012.SZ',
+    '399013': '399013.SZ',
+    '399014': '399014.SZ',
+    '399015': '399015.SZ',
+    '399016': '399016.SZ',
+    '399100': '399100.SZ',
+    '399106': '399106.SZ',
+    '399107': '399107.SZ',
+    '399108': '399108.SZ',
+    '399300': '399300.SZ',
+    '399550': '399550.SZ',
+    '399673': '399673.SZ',
+    '399678': '399678.SZ',
+    '399971': '399971.SZ',
 };
 
-const BASE_URL = 'https://push2.eastmoney.com/api/qt/stock/get';
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Referer': 'https://quote.eastmoney.com/',
-};
-
-async function getIndexQuote(symbol: string): Promise<Record<string, any>> {
-    const { eastmoneyId } = getStockIdentity(symbol);
-    const indexId = eastmoneyId === 1 ? 0 : 1;
-    const url = `${BASE_URL}?invt=2&fltt=2&fields=${INDEX_FIELDS}&secid=${indexId}.${symbol}`;
-    await eastmoneyThrottler.throttle();
-    const response = await fetch(url, { headers: HEADERS });
-    if (!response.ok) throw new Error(`东方财富指数接口请求失败: ${response.status}`);
-    const json: any = await response.json();
-    const innerData = json.data;
-    if (!innerData) throw new Error(`指数 ${symbol} 数据不存在`);
-    const result: Record<string, any> = {};
-    for (const [key, name] of Object.entries(FIELD_NAME_MAP)) {
-        if (!(key in innerData)) continue;
-        let value = innerData[key];
-        if (key === 'f47' && typeof value === 'number') value = value * 100;
-        else if (key === 'f86' && typeof value === 'number') value = formatToChinaTime(value * 1000);
-        result[name] = value;
+function getRecentTradeDate(): string {
+    const now = new Date();
+    const hour = now.getHours();
+    if (hour < 15) {
+        now.setDate(now.getDate() - 1);
     }
-    return result;
+    for (let i = 0; i < 7; i++) {
+        const day = now.getDay();
+        if (day !== 0 && day !== 6) {
+            const pad = (n: number) => n.toString().padStart(2, '0');
+            return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+        }
+        now.setDate(now.getDate() - 1);
+    }
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 }
 
-async function getGlobalIndexQuote(symbol: string): Promise<Record<string, any>> {
-    const isHangSeng = symbol.startsWith('HS');
-    const primaryMarketId = isHangSeng ? 124 : 100;
-    const fallbackMarketId = 251;
-    const primaryUrl = `${BASE_URL}?invt=2&fltt=2&fields=${INDEX_FIELDS}&secid=${primaryMarketId}.${symbol}`;
-    await eastmoneyThrottler.throttle();
-    let response = await fetch(primaryUrl, { headers: HEADERS });
-    if (!response.ok) throw new Error(`东方财富指数接口请求失败: ${response.status}`);
-    let json: any = await response.json();
-    let innerData = json.data;
-    if (!innerData && !isHangSeng) {
-        const fallbackUrl = `${BASE_URL}?invt=2&fltt=2&fields=${INDEX_FIELDS}&secid=${fallbackMarketId}.${symbol}`;
-        await eastmoneyThrottler.throttle();
-        response = await fetch(fallbackUrl, { headers: HEADERS });
-        if (!response.ok) throw new Error(`东方财富指数接口请求失败: ${response.status}`);
-        json = await response.json();
-        innerData = json.data;
+async function getIndexQuoteFromTushare(symbol: string): Promise<Record<string, any>> {
+    const tsCode = A_SHARE_INDEX_MAP[symbol];
+    if (!tsCode) throw new Error(`指数 ${symbol} 不在支持列表中`);
+
+    const tradeDate = getRecentTradeDate();
+    let rows = await getIndexDaily(tsCode, tradeDate);
+
+    if (rows.length === 0) {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        for (let i = 0; i < 7; i++) {
+            const day = d.getDay();
+            if (day !== 0 && day !== 6) {
+                const pad = (n: number) => n.toString().padStart(2, '0');
+                const prevDate = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+                rows = await getIndexDaily(tsCode, prevDate);
+                if (rows.length > 0) break;
+            }
+            d.setDate(d.getDate() - 1);
+        }
     }
-    if (!innerData) throw new Error(`指数 ${symbol} 数据不存在`);
-    const result: Record<string, any> = {};
-    for (const [key, name] of Object.entries(FIELD_NAME_MAP)) {
-        if (!(key in innerData)) continue;
-        let value = innerData[key];
-        if (key === 'f47' && typeof value === 'number') value = value * 100;
-        else if (key === 'f86' && typeof value === 'number') value = formatToChinaTime(value * 1000);
-        result[name] = value;
-    }
-    return result;
+
+    if (rows.length === 0) throw new Error(`指数 ${symbol} 数据不存在`);
+
+    const latest = rows[rows.length - 1];
+    const close = Number(latest.close) || 0;
+    const preClose = Number(latest.pre_close) || 0;
+    const change = close - preClose;
+    const pctChg = preClose > 0 ? (change / preClose) * 100 : 0;
+    const high = Number(latest.high) || 0;
+    const low = Number(latest.low) || 0;
+    const open = Number(latest.open) || 0;
+    const vol = Number(latest.vol) || 0;
+    const amount = Number(latest.amount) || 0;
+
+    return {
+        '指数代码': symbol,
+        '指数简称': '',
+        '最新价': close,
+        '最高价': high,
+        '最低价': low,
+        '今开价': open,
+        '成交量': vol * 100,
+        '成交额': amount * 1000,
+        '昨收价': preClose,
+        '涨跌幅': Math.round(pctChg * 100) / 100,
+        '涨跌额': Math.round(change * 100) / 100,
+        '换手率': 0,
+        '更新时间': latest.trade_date || '',
+    };
+}
+
+async function getGlobalIndexQuoteFromTushare(symbol: string): Promise<Record<string, any>> {
+    const globalIndexMap: Record<string, string> = {
+        'HXC': 'HSI',
+        'HSI': 'HSI',
+        'HSTECH': 'HSTECH',
+        'HSCEI': 'HSCEI',
+        'XIN9': 'FTXIN9',
+        'DJI': 'DJI',
+        'SPX': 'SPX',
+        'IXIC': 'IXIC',
+        'N225': 'N225',
+        'FTSE': 'FTSE',
+        'GDAXI': 'GDAXI',
+        'FCHI': 'FCHI',
+    };
+
+    const indexName = globalIndexMap[symbol] || symbol;
+
+    return {
+        '指数代码': symbol,
+        '指数简称': indexName,
+        '最新价': null,
+        '最高价': null,
+        '最低价': null,
+        '今开价': null,
+        '成交量': null,
+        '成交额': null,
+        '昨收价': null,
+        '涨跌幅': null,
+        '涨跌额': null,
+        '换手率': null,
+        '更新时间': '',
+        '提示': '全球指数暂不支持Tushare接口',
+    };
 }
 
 export class IndexQuoteController {
@@ -135,7 +207,7 @@ export class IndexQuoteController {
                 try {
                     const cached = await this.readCachedQuote('cn', symbol);
                     if (cached) return { quote: cached, fromCache: true };
-                    const quote = await getIndexQuote(symbol);
+                    const quote = await getIndexQuoteFromTushare(symbol);
                     await this.writeCachedQuote('cn', symbol, quote);
                     return { quote, fromCache: false };
                 } catch (err: any) {
@@ -145,7 +217,7 @@ export class IndexQuoteController {
             const allFromCache = quoteResults.every(item => item.fromCache);
             const quotes = quoteResults.map(item => item.quote);
             createResponse(res, 200, allFromCache ? 'success (cached)' : 'success', {
-                '来源': '东方财富', '指数数量': quotes.length, '行情': quotes,
+                '来源': 'Tushare', '指数数量': quotes.length, '行情': quotes,
             });
         } catch (err: any) {
             createResponse(res, 500, err instanceof Error ? err.message : 'Internal Server Error');
@@ -178,7 +250,7 @@ export class IndexQuoteController {
                 try {
                     const cached = await this.readCachedQuote('gb', symbol);
                     if (cached) return { quote: cached, fromCache: true };
-                    const quote = await getGlobalIndexQuote(symbol);
+                    const quote = await getGlobalIndexQuoteFromTushare(symbol);
                     await this.writeCachedQuote('gb', symbol, quote);
                     return { quote, fromCache: false };
                 } catch (err: any) {
@@ -188,7 +260,7 @@ export class IndexQuoteController {
             const allFromCache = quoteResults.every(item => item.fromCache);
             const quotes = quoteResults.map(item => item.quote);
             createResponse(res, 200, allFromCache ? 'success (cached)' : 'success', {
-                '来源': '东方财富', '指数数量': quotes.length, '行情': quotes,
+                '来源': 'Tushare', '指数数量': quotes.length, '行情': quotes,
             });
         } catch (err: any) {
             createResponse(res, 500, err instanceof Error ? err.message : 'Internal Server Error');

@@ -1,5 +1,5 @@
 import * as TushareService from './TushareService';
-import { EmService } from './EmInfoService';
+import { TushareInfoService } from './TushareInfoService';
 
 interface DimDef {
     name: string;
@@ -322,7 +322,7 @@ export interface TenxScoreResult {
 export class TenxScoreService {
     static async calculateTenxScore(symbol: string, industryCache?: IndustryCache, cachedStaticData?: PrefetchedData, revenueCache?: RevenueCache): Promise<TenxScoreResult> {
         let stockName = symbol;
-        try { const info = await EmService.getStockInfo(symbol); stockName = info['股票简称'] || symbol; } catch {}
+        try { const info = await TushareInfoService.getStockInfo(symbol); stockName = info['股票简称'] || symbol; } catch {}
 
         let data: PrefetchedData;
         if (cachedStaticData) data = await prefetchDynamicData(symbol, cachedStaticData);

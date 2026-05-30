@@ -1,8 +1,8 @@
-import type { StockRankResult } from '../services/EmStockRankService';
+import type { StockRankResult } from '../services/TushareRankService';
 
 export const HOT_STOCKS_CACHE_KEY = 'hot_stocks:v1';
 export const HOT_STOCKS_CACHE_TTL_SECONDS = 30 * 60;
-export const HOT_STOCKS_SOURCE = '东方财富 https://guba.eastmoney.com/rank/';
+export const HOT_STOCKS_SOURCE = 'Tushare https://tushare.pro';
 export const STOCK_INFO_CACHE_KEY_PREFIX = 'stock_info:';
 export const STOCK_INFO_CACHE_TTL_SECONDS = 14 * 24 * 60 * 60;
 export const INDEX_QUOTE_CACHE_KEY_PREFIX = 'index_quote:';

@@ -1,4 +1,4 @@
-import { EmQuoteService } from './EmQuoteService';
+import { TushareQuoteService } from './TushareQuoteService';
 import { ThsService } from './ThsService';
 import { ClsStockNewsService } from './ClsStockNewsService';
 import { formatToChinaTime } from '../utils/datetime';
@@ -414,7 +414,7 @@ JSON 结构如下：
         const [newsResult, forecastResult, tradingResult] = await Promise.allSettled([
             this.fetchStockNewsDigest(symbol),
             ThsService.getProfitForecast(symbol),
-            EmQuoteService.getQuote(symbol, 'activity'),
+            TushareQuoteService.getQuote(symbol, 'activity'),
         ]);
 
         const newsList = newsResult.status === 'fulfilled' ? newsResult.value : [];

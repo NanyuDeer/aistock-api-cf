@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { EmStockRankService } from '../services/EmStockRankService';
+import { TushareRankService } from '../services/TushareRankService';
 import { createResponse } from '../utils/response';
 import { formatToChinaTime } from '../utils/datetime';
 import { CacheService } from '../services/CacheService';
@@ -34,7 +34,7 @@ export class StockRankController {
         }
     }
 
-    private static async writeHotStocksCache(rankList: Awaited<ReturnType<typeof EmStockRankService.getStockHotRank>>): Promise<void> {
+    private static async writeHotStocksCache(rankList: Awaited<ReturnType<typeof TushareRankService.getStockHotRank>>): Promise<void> {
         const hotStocks = rankList.slice(0, StockRankController.MAX_COUNT);
         const payload: HotStocksCachePayload = {
             timestamp: Date.now(),
@@ -76,7 +76,7 @@ export class StockRankController {
                 return;
             }
 
-            const rankList = await EmStockRankService.getStockHotRank();
+            const rankList = await TushareRankService.getStockHotRank();
             const now = Date.now();
 
             this.writeHotStocksCache(rankList).catch(() => {});

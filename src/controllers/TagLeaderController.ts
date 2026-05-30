@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { EmTagLeaderService } from '../services/EmTagLeaderService';
+import { TushareTagLeaderService } from '../services/TushareTagLeaderService';
 import { createResponse } from '../utils/response';
 import { isValidTagCode } from '../utils/validator';
 
@@ -27,9 +27,9 @@ export class TagLeaderController {
         }
 
         try {
-            const leaders = await EmTagLeaderService.getTagLeaders(tagCode, count);
+            const leaders = await TushareTagLeaderService.getTagLeaders(tagCode, count);
             createResponse(res, 200, 'success', {
-                '来源': '东方财富 https://push2.eastmoney.com/api/qt/clist/get',
+                '来源': 'Tushare https://tushare.pro',
                 '板块ID': tagCode,
                 '排序字段': '主力净流入',
                 '排序方式': '降序',
