@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { createResponse } from '../utils/response';
 import { isValidAShareSymbol, isValidGlobalIndexSymbol } from '../utils/validator';
 import { CacheService } from '../services/CacheService';
-import { getIndexDaily } from '../services/TushareService';
 import {
     INDEX_QUOTE_CACHE_KEY_PREFIX,
     buildTimestampedCachePayload,
@@ -13,144 +12,127 @@ import { getAShareIndexCacheTtlSeconds } from '../utils/tradingTime';
 
 const MAX_SYMBOLS = 20;
 
-const A_SHARE_INDEX_MAP: Record<string, string> = {
-    '000001': '000001.SH',
-    '000002': '000002.SH',
-    '000003': '000003.SH',
-    '000004': '000004.SH',
-    '000005': '000005.SH',
-    '399001': '399001.SZ',
-    '399002': '399002.SZ',
-    '399003': '399003.SZ',
-    '399004': '399004.SZ',
-    '399005': '399005.SZ',
-    '399006': '399006.SZ',
-    '399007': '399007.SZ',
-    '399008': '399008.SZ',
-    '399009': '399009.SZ',
-    '399010': '399010.SZ',
-    '399011': '399011.SZ',
-    '399012': '399012.SZ',
-    '399013': '399013.SZ',
-    '399014': '399014.SZ',
-    '399015': '399015.SZ',
-    '399016': '399016.SZ',
-    '399100': '399100.SZ',
-    '399106': '399106.SZ',
-    '399107': '399107.SZ',
-    '399108': '399108.SZ',
-    '399300': '399300.SZ',
-    '399550': '399550.SZ',
-    '399673': '399673.SZ',
-    '399678': '399678.SZ',
-    '399971': '399971.SZ',
+const CN_INDEX_NAMES: Record<string, string> = {
+    '000001': '上证指数',
+    '000002': '上证A指',
+    '000003': '上证B指',
+    '399001': '深证成指',
+    '399002': '深成指A',
+    '399003': '深成指B',
+    '399004': '深证100',
+    '399005': '中小100',
+    '399006': '创业板指',
+    '399007': '深证300',
+    '399008': '中小300',
+    '399100': '深证新指数',
+    '399106': '深证综指',
+    '399107': '深证A指',
+    '399108': '深证B指',
+    '399300': '沪深300',
+    '399550': '央视50',
+    '399673': '创业板50',
+    '399678': '深证200',
+    '399971': '中证传媒',
 };
 
-function getRecentTradeDate(): string {
-    const now = new Date();
-    const hour = now.getHours();
-    if (hour < 15) {
-        now.setDate(now.getDate() - 1);
-    }
-    for (let i = 0; i < 7; i++) {
-        const day = now.getDay();
-        if (day !== 0 && day !== 6) {
-            const pad = (n: number) => n.toString().padStart(2, '0');
-            return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-        }
-        now.setDate(now.getDate() - 1);
-    }
-    const d = new Date();
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+const CN_INDEX_TENCENT_PREFIX: Record<string, string> = {
+    '000001': 'sh', '000002': 'sh', '000003': 'sh', '000004': 'sh', '000005': 'sh',
+    '399001': 'sz', '399002': 'sz', '399003': 'sz', '399004': 'sz', '399005': 'sz',
+    '399006': 'sz', '399007': 'sz', '399008': 'sz', '399009': 'sz', '399010': 'sz',
+    '399011': 'sz', '399012': 'sz', '399013': 'sz', '399014': 'sz', '399015': 'sz',
+    '399016': 'sz', '399100': 'sz', '399106': 'sz', '399107': 'sz', '399108': 'sz',
+    '399300': 'sz', '399550': 'sz', '399673': 'sz', '399678': 'sz', '399971': 'sz',
+};
+
+const GB_INDEX_NAMES: Record<string, string> = {
+    'HXC': '纳斯达克中国金龙指数',
+    'HSTECH': '恒生科技指数',
+    'HSI': '恒生指数',
+    'HSCEI': '恒生国企指数',
+    'DJI': '道琼斯工业指数',
+    'SPX': '标普500',
+    'IXIC': '纳斯达克综合指数',
+    'N225': '日经225',
+    'FTSE': '富时100',
+    'GDAXI': '德国DAX',
+    'FCHI': '法国CAC40',
+};
+
+const GB_INDEX_TENCENT_CODE: Record<string, string> = {
+    'HXC': 'usHXC', 'DJI': 'usDJI', 'SPX': 'usSPX', 'IXIC': 'usIXIC',
+    'HSTECH': 'hkHSTECH', 'HSI': 'hkHSI', 'HSCEI': 'hkHSCEI',
+    'N225': 'jpN225', 'FTSE': 'ukFTSE', 'GDAXI': 'deGDAXI', 'FCHI': 'frFCHI',
+};
+
+const GB_TENCENT_RETURN_CODE_TO_SYMBOL: Record<string, string> = {
+    '.HXC': 'HXC', 'HXC': 'HXC',
+    'DJI': 'DJI', '.DJI': 'DJI',
+    'SPX': 'SPX', '.SPX': 'SPX',
+    'IXIC': 'IXIC', '.IXIC': 'IXIC',
+    'HSTECH': 'HSTECH',
+    'HSI': 'HSI',
+    'HSCEI': 'HSCEI',
+    'N225': 'N225', '.N225': 'N225',
+    'FTSE': 'FTSE', '.FTSE': 'FTSE',
+    'GDAXI': 'GDAXI', '.GDAXI': 'GDAXI',
+    'FCHI': 'FCHI', '.FCHI': 'FCHI',
+};
+
+interface ParsedTencentIndex {
+    code: string;
+    value: number;
+    change: number;
+    changeAmount: number;
 }
 
-async function getIndexQuoteFromTushare(symbol: string): Promise<Record<string, any>> {
-    const tsCode = A_SHARE_INDEX_MAP[symbol];
-    if (!tsCode) throw new Error(`指数 ${symbol} 不在支持列表中`);
+function parseTencentIndexLine(line: string): ParsedTencentIndex | null {
+    const eqIdx = line.indexOf('="');
+    if (eqIdx < 0) return null;
+    const valuePart = line.substring(eqIdx + 2, line.length - 2);
+    if (!valuePart) return null;
+    const parts = valuePart.split('~');
+    if (parts.length < 33) return null;
 
-    const tradeDate = getRecentTradeDate();
-    let rows = await getIndexDaily(tsCode, tradeDate);
+    const code = parts[2] || '';
+    const value = parseFloat(parts[3]);
+    const changeAmount = parseFloat(parts[31]);
+    const change = parseFloat(parts[32]);
 
-    if (rows.length === 0) {
-        const d = new Date();
-        d.setDate(d.getDate() - 1);
-        for (let i = 0; i < 7; i++) {
-            const day = d.getDay();
-            if (day !== 0 && day !== 6) {
-                const pad = (n: number) => n.toString().padStart(2, '0');
-                const prevDate = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
-                rows = await getIndexDaily(tsCode, prevDate);
-                if (rows.length > 0) break;
+    if (!Number.isFinite(value)) return null;
+
+    return {
+        code,
+        value,
+        change: Number.isFinite(change) ? change : 0,
+        changeAmount: Number.isFinite(changeAmount) ? changeAmount : 0,
+    };
+}
+
+async function fetchTencentIndexQuotes(tencentCodes: string[]): Promise<Map<string, ParsedTencentIndex>> {
+    const result = new Map<string, ParsedTencentIndex>();
+    if (tencentCodes.length === 0) return result;
+
+    try {
+        const url = `https://qt.gtimg.cn/q=${tencentCodes.join(',')}`;
+        const response = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        });
+        if (!response.ok) return result;
+
+        const buf = Buffer.from(await response.arrayBuffer());
+        const text = new TextDecoder('gbk').decode(buf);
+        const lines = text.split(';').filter(l => l.trim());
+
+        for (const line of lines) {
+            const parsed = parseTencentIndexLine(line);
+            if (parsed) {
+                result.set(parsed.code, parsed);
             }
-            d.setDate(d.getDate() - 1);
         }
+    } catch (err: any) {
+        console.error('[IndexQuote] Tencent fetch error:', err?.message || err);
     }
-
-    if (rows.length === 0) throw new Error(`指数 ${symbol} 数据不存在`);
-
-    const latest = rows[rows.length - 1];
-    const close = Number(latest.close) || 0;
-    const preClose = Number(latest.pre_close) || 0;
-    const change = close - preClose;
-    const pctChg = preClose > 0 ? (change / preClose) * 100 : 0;
-    const high = Number(latest.high) || 0;
-    const low = Number(latest.low) || 0;
-    const open = Number(latest.open) || 0;
-    const vol = Number(latest.vol) || 0;
-    const amount = Number(latest.amount) || 0;
-
-    return {
-        '指数代码': symbol,
-        '指数简称': '',
-        '最新价': close,
-        '最高价': high,
-        '最低价': low,
-        '今开价': open,
-        '成交量': vol * 100,
-        '成交额': amount * 1000,
-        '昨收价': preClose,
-        '涨跌幅': Math.round(pctChg * 100) / 100,
-        '涨跌额': Math.round(change * 100) / 100,
-        '换手率': 0,
-        '更新时间': latest.trade_date || '',
-    };
-}
-
-async function getGlobalIndexQuoteFromTushare(symbol: string): Promise<Record<string, any>> {
-    const globalIndexMap: Record<string, string> = {
-        'HXC': 'HSI',
-        'HSI': 'HSI',
-        'HSTECH': 'HSTECH',
-        'HSCEI': 'HSCEI',
-        'XIN9': 'FTXIN9',
-        'DJI': 'DJI',
-        'SPX': 'SPX',
-        'IXIC': 'IXIC',
-        'N225': 'N225',
-        'FTSE': 'FTSE',
-        'GDAXI': 'GDAXI',
-        'FCHI': 'FCHI',
-    };
-
-    const indexName = globalIndexMap[symbol] || symbol;
-
-    return {
-        '指数代码': symbol,
-        '指数简称': indexName,
-        '最新价': null,
-        '最高价': null,
-        '最低价': null,
-        '今开价': null,
-        '成交量': null,
-        '成交额': null,
-        '昨收价': null,
-        '涨跌幅': null,
-        '涨跌额': null,
-        '换手率': null,
-        '更新时间': '',
-        '提示': '全球指数暂不支持Tushare接口',
-    };
+    return result;
 }
 
 export class IndexQuoteController {
@@ -164,8 +146,7 @@ export class IndexQuoteController {
             const cached = await CacheService.get<StockInfoCachePayload>(cacheKey);
             if (!isValidStockInfoCachePayload(cached)) return null;
             return cached.data;
-        } catch (err) {
-            console.error(`Error reading index quote cache ${cacheKey}:`, err);
+        } catch {
             return null;
         }
     }
@@ -176,9 +157,11 @@ export class IndexQuoteController {
         const cacheKey = this.buildIndexCacheKey(market, symbol);
         try {
             await CacheService.set(cacheKey, buildTimestampedCachePayload(quote), resolvedTtl);
-        } catch (err) {
-            console.error(`Error writing index quote cache ${cacheKey}:`, err);
-        }
+        } catch {}
+    }
+
+    private static resolveGbSymbolFromTencentCode(tencentReturnCode: string): string | undefined {
+        return GB_TENCENT_RETURN_CODE_TO_SYMBOL[tencentReturnCode];
     }
 
     static async getIndexQuotes(req: Request, res: Response, _next: NextFunction): Promise<void> {
@@ -188,37 +171,50 @@ export class IndexQuoteController {
             return;
         }
         const symbols = [...new Set(symbolsParam.split(',').map(s => s.trim()).filter(Boolean))];
-        if (symbols.length === 0) {
-            createResponse(res, 400, '缺少 symbols 参数');
-            return;
-        }
-        if (symbols.length > MAX_SYMBOLS) {
-            createResponse(res, 400, `单次最多查询 ${MAX_SYMBOLS} 只指数`);
-            return;
-        }
+        if (symbols.length === 0) { createResponse(res, 400, '缺少 symbols 参数'); return; }
+        if (symbols.length > MAX_SYMBOLS) { createResponse(res, 400, `单次最多查询 ${MAX_SYMBOLS} 只指数`); return; }
         const invalidSymbols = symbols.filter(s => !isValidAShareSymbol(s));
-        if (invalidSymbols.length > 0) {
-            createResponse(res, 400, `Invalid symbol(s) - 指数代码必须是6位数字: ${invalidSymbols.join(', ')}`);
-            return;
-        }
+        if (invalidSymbols.length > 0) { createResponse(res, 400, `指数代码必须是6位数字: ${invalidSymbols.join(', ')}`); return; }
 
         try {
-            const quoteResults = await Promise.all(symbols.map(async (symbol) => {
-                try {
-                    const cached = await this.readCachedQuote('cn', symbol);
-                    if (cached) return { quote: cached, fromCache: true };
-                    const quote = await getIndexQuoteFromTushare(symbol);
-                    await this.writeCachedQuote('cn', symbol, quote);
-                    return { quote, fromCache: false };
-                } catch (err: any) {
-                    return { quote: { '指数代码': symbol, '错误': err?.message || '查询失败' }, fromCache: false };
+            const cachedQuotes: Record<string, any> = {};
+            const uncachedSymbols: string[] = [];
+
+            for (const symbol of symbols) {
+                const cached = await this.readCachedQuote('cn', symbol);
+                if (cached) { cachedQuotes[symbol] = cached; }
+                else { uncachedSymbols.push(symbol); }
+            }
+
+            if (uncachedSymbols.length > 0) {
+                const tencentCodes = uncachedSymbols.map(s => {
+                    const prefix = CN_INDEX_TENCENT_PREFIX[s] || 'sh';
+                    return `${prefix}${s}`;
+                });
+
+                const tencentData = await fetchTencentIndexQuotes(tencentCodes);
+
+                for (const symbol of uncachedSymbols) {
+                    const td = tencentData.get(symbol);
+                    const name = CN_INDEX_NAMES[symbol] || symbol;
+
+                    const quote: Record<string, any> = {
+                        '指数代码': symbol,
+                        '指数简称': name,
+                        '最新价': td ? td.value : null,
+                        '涨跌幅': td ? td.change : null,
+                        '涨跌额': td ? td.changeAmount : null,
+                    };
+
+                    if (td) {
+                        await this.writeCachedQuote('cn', symbol, quote);
+                    }
+                    cachedQuotes[symbol] = quote;
                 }
-            }));
-            const allFromCache = quoteResults.every(item => item.fromCache);
-            const quotes = quoteResults.map(item => item.quote);
-            createResponse(res, 200, allFromCache ? 'success (cached)' : 'success', {
-                '来源': 'Tushare', '指数数量': quotes.length, '行情': quotes,
-            });
+            }
+
+            const quotes = symbols.map(s => cachedQuotes[s]).filter(Boolean);
+            createResponse(res, 200, 'success', { '来源': 'Tencent', '指数数量': quotes.length, '行情': quotes });
         } catch (err: any) {
             createResponse(res, 500, err instanceof Error ? err.message : 'Internal Server Error');
         }
@@ -227,41 +223,65 @@ export class IndexQuoteController {
     static async getGlobalIndexQuotes(req: Request, res: Response, _next: NextFunction): Promise<void> {
         const symbolsParam = req.query.symbols as string;
         if (!symbolsParam) {
-            createResponse(res, 400, '缺少 symbols 参数，示例: ?symbols=HXC,XIN9,HSTECH');
+            createResponse(res, 400, '缺少 symbols 参数，示例: ?symbols=HSI,HSTECH,HXC');
             return;
         }
         const symbols = [...new Set(symbolsParam.split(',').map(s => s.trim().toUpperCase()).filter(Boolean))];
-        if (symbols.length === 0) {
-            createResponse(res, 400, '缺少 symbols 参数');
-            return;
-        }
-        if (symbols.length > MAX_SYMBOLS) {
-            createResponse(res, 400, `单次最多查询 ${MAX_SYMBOLS} 只指数`);
-            return;
-        }
+        if (symbols.length === 0) { createResponse(res, 400, '缺少 symbols 参数'); return; }
+        if (symbols.length > MAX_SYMBOLS) { createResponse(res, 400, `单次最多查询 ${MAX_SYMBOLS} 只指数`); return; }
         const invalidSymbols = symbols.filter(s => !isValidGlobalIndexSymbol(s));
-        if (invalidSymbols.length > 0) {
-            createResponse(res, 400, `Invalid symbol(s) - 全球指数代码格式错误: ${invalidSymbols.join(', ')}`);
-            return;
-        }
+        if (invalidSymbols.length > 0) { createResponse(res, 400, `全球指数代码格式错误: ${invalidSymbols.join(', ')}`); return; }
 
         try {
-            const quoteResults = await Promise.all(symbols.map(async (symbol) => {
-                try {
-                    const cached = await this.readCachedQuote('gb', symbol);
-                    if (cached) return { quote: cached, fromCache: true };
-                    const quote = await getGlobalIndexQuoteFromTushare(symbol);
-                    await this.writeCachedQuote('gb', symbol, quote);
-                    return { quote, fromCache: false };
-                } catch (err: any) {
-                    return { quote: { '指数代码': symbol, '错误': err?.message || '查询失败' }, fromCache: false };
+            const cachedQuotes: Record<string, any> = {};
+            const uncachedSymbols: string[] = [];
+
+            for (const symbol of symbols) {
+                const cached = await this.readCachedQuote('gb', symbol);
+                if (cached) { cachedQuotes[symbol] = cached; }
+                else { uncachedSymbols.push(symbol); }
+            }
+
+            if (uncachedSymbols.length > 0) {
+                const tencentCodes = uncachedSymbols.map(s => GB_INDEX_TENCENT_CODE[s] || `us${s}`);
+
+                const tencentData = await fetchTencentIndexQuotes(tencentCodes);
+
+                const tencentCodeToSymbol = new Map<string, string>();
+                for (const symbol of uncachedSymbols) {
+                    const tc = GB_INDEX_TENCENT_CODE[symbol] || `us${symbol}`;
+                    tencentCodeToSymbol.set(tc, symbol);
                 }
-            }));
-            const allFromCache = quoteResults.every(item => item.fromCache);
-            const quotes = quoteResults.map(item => item.quote);
-            createResponse(res, 200, allFromCache ? 'success (cached)' : 'success', {
-                '来源': 'Tushare', '指数数量': quotes.length, '行情': quotes,
-            });
+
+                const resolvedData = new Map<string, ParsedTencentIndex>();
+                for (const [returnCode, data] of tencentData.entries()) {
+                    const symbol = this.resolveGbSymbolFromTencentCode(returnCode);
+                    if (symbol) {
+                        resolvedData.set(symbol, data);
+                    }
+                }
+
+                for (const symbol of uncachedSymbols) {
+                    const td = resolvedData.get(symbol);
+                    const name = GB_INDEX_NAMES[symbol] || symbol;
+
+                    const quote: Record<string, any> = {
+                        '指数代码': symbol,
+                        '指数简称': name,
+                        '最新价': td ? td.value : null,
+                        '涨跌幅': td ? td.change : null,
+                        '涨跌额': td ? td.changeAmount : null,
+                    };
+
+                    if (td) {
+                        await this.writeCachedQuote('gb', symbol, quote);
+                    }
+                    cachedQuotes[symbol] = quote;
+                }
+            }
+
+            const quotes = symbols.map(s => cachedQuotes[s]).filter(Boolean);
+            createResponse(res, 200, 'success', { '来源': 'Tencent', '指数数量': quotes.length, '行情': quotes });
         } catch (err: any) {
             createResponse(res, 500, err instanceof Error ? err.message : 'Internal Server Error');
         }

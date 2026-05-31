@@ -24,6 +24,7 @@ import { ScanLoginController } from './controllers/ScanLoginController';
 import { StockAnalysisController } from './controllers/StockAnalysisController';
 import { StockOcrController } from './controllers/StockOcrController';
 import { TenxScoreController } from './controllers/TenxScoreController';
+import { CapitalFlowController } from './controllers/CapitalFlowController';
 import { TenxBatchService } from './services/TenxBatchService';
 import { isValidAShareSymbol } from './utils/validator';
 
@@ -126,6 +127,17 @@ app.post('/api/cn/stocks/ocr', (req, res, next) => StockOcrController.batchOcr(r
 
 app.get('/api/cn/tags/:tagCode/leaders', (req, res, next) => TagLeaderController.getTagLeaders(req, res, next));
 
+app.get('/api/cn/stocks/:symbol/capital-flow', (req, res, next) => {
+    if (!isValidAShareSymbol(req.params.symbol)) {
+        res.status(400).json({ code: 400, message: 'Invalid symbol - A股代码必须是6位数字' });
+        return;
+    }
+    CapitalFlowController.getCapitalFlow(req, res, next);
+});
+
+app.post('/api/cn/capital-flow/batch-prefetch', (req, res, next) => CapitalFlowController.batchPrefetch(req, res, next));
+app.get('/api/cn/capital-flow/batch-status', (req, res, next) => CapitalFlowController.getBatchStatus(req, res, next));
+
 app.get('/api/cn/stocks/:symbol/news', (req, res, next) => {
     if (!isValidAShareSymbol(req.params.symbol)) {
         res.status(400).json({ code: 400, message: 'Invalid symbol - A股代码必须是6位数字' });
@@ -226,6 +238,44 @@ cron.schedule('0 19 * * *', async () => {
         console.log('[TenxCron] 批量评分完成');
     } catch (err: any) {
         console.error('[TenxCron] 批量评分失败:', err?.message || err);
+    }
+});
+
+cron.schedule('30 15 * * 1-5', async () => {
+    console.log('[CapitalFlowCron] 收盘后批量预取资金流向');
+    try {
+        const { isAShareTradingTime } = await import('./utils/tradingTime');
+        const isTrading = await isAShareTradingTime();
+        if (isTrading) {
+            console.log('[CapitalFlowCron] 仍在交易时间，跳过');
+            return;
+        }
+        const poolModule = await import('./db');
+        const dbPool = poolModule.default;
+        const result = await dbPool.query('SELECT symbol FROM stocks');
+        const symbols = result.rows.map((r: any) => r.symbol as string);
+        console.log(`[CapitalFlowCron] 共${symbols.length}只股票待预取`);
+
+        const { getCapitalFlow } = await import('./services/TushareCapitalFlowService');
+        const { CacheService } = await import('./services/CacheService');
+        const { getAShareAdaptiveCacheTtlSeconds } = await import('./utils/tradingTime');
+
+        let success = 0, failed = 0;
+        for (const symbol of symbols) {
+            try {
+                const cacheKey = `capital_flow:${symbol}`;
+                const data = await getCapitalFlow(symbol);
+                const ttl = await getAShareAdaptiveCacheTtlSeconds(3 * 60);
+                await CacheService.put(cacheKey, data as unknown as Record<string, any>, ttl);
+                success++;
+            } catch (err: any) {
+                failed++;
+                if (failed <= 5) console.error(`[CapitalFlowCron] ${symbol} error:`, err?.message || err);
+            }
+        }
+        console.log(`[CapitalFlowCron] 完成: 成功=${success}, 失败=${failed}`);
+    } catch (err: any) {
+        console.error('[CapitalFlowCron] 批量预取失败:', err?.message || err);
     }
 });
 
