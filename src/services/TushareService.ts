@@ -126,10 +126,15 @@ export interface DailyBasicRow {
     ts_code: string; trade_date: string;
     pe: number; pb: number; ps: number;
     total_mv: number; circ_mv: number;
+    turnover_rate: number;
 }
 
 export async function getDailyBasic(symbol: string, startDate: string): Promise<DailyBasicRow[]> {
-    const rows = await tushareRequest('daily_basic', { ts_code: toTsCode(symbol), start_date: startDate });
+    const rows = await tushareRequest('daily_basic', {
+        ts_code: toTsCode(symbol),
+        start_date: startDate,
+        fields: 'ts_code,trade_date,pe,pb,ps,total_mv,circ_mv,turnover_rate',
+    });
     return rows as DailyBasicRow[];
 }
 
