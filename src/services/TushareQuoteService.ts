@@ -132,7 +132,7 @@ export class TushareQuoteService {
         const high = Number(daily.high) || 0;
         const low = Number(daily.low) || 0;
         const open = Number(daily.open) || 0;
-        const turnover = Number(daily.turnover) || 0;
+        const turnoverRate = Number(basic?.turnover_rate) || 0;
         const { limitUp, limitDown } = calcLimitPrice(preClose, symbol);
 
         const result: Record<string, any> = {
@@ -157,7 +157,7 @@ export class TushareQuoteService {
             result['成交量'] = vol * 100;
             result['成交额'] = amount * 1000;
             result['振幅'] = preClose > 0 ? Math.round(((high - low) / preClose) * 10000) / 100 : 0;
-            result['换手率'] = turnover > 0 ? turnover : null;
+            result['换手率'] = turnoverRate > 0 ? turnoverRate : null;
             result['量比'] = volumeRatio;
             result['涨停价'] = limitUp;
             result['跌停价'] = limitDown;
@@ -172,7 +172,7 @@ export class TushareQuoteService {
             result['市净率'] = basic?.pb ?? null;
             result['总市值'] = basic?.total_mv ? Math.round(basic.total_mv * 10000) : null;
             result['流通市值'] = basic?.circ_mv ? Math.round(basic.circ_mv * 10000) : null;
-            result['换手率'] = turnover > 0 ? turnover : null;
+            result['换手率'] = turnoverRate > 0 ? turnoverRate : null;
             result['成交量'] = vol * 100;
             result['成交额'] = amount * 1000;
             result['昨收价'] = preClose;
