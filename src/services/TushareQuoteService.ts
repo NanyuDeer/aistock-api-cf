@@ -34,6 +34,29 @@ function getRecentTradeDate(): string {
     return getTodayStr();
 }
 
+function calcLimitPrice(preClose: number, symbol: string): { limitUp: number; limitDown: number } {
+    if (preClose <= 0) return { limitUp: 0, limitDown: 0 };
+    if (symbol.startsWith('688') || symbol.startsWith('300')) {
+        return {
+            limitUp: Math.round(preClose * 1.2 * 100) / 100,
+            limitDown: Math.round(preClose * 0.8 * 100) / 100,
+        };
+    }
+    if (symbol.startsWith('920')) {
+        return {
+            limitUp: Math.round(preClose * 1.3 * 100) / 100,
+            limitDown: Math.round(preClose * 0.7 * 100) / 100,
+        };
+    }
+    const isST = false;
+    const upRatio = isST ? 1.05 : 1.1;
+    const downRatio = isST ? 0.95 : 0.9;
+    return {
+        limitUp: Math.round(preClose * upRatio * 100) / 100,
+        limitDown: Math.round(preClose * downRatio * 100) / 100,
+    };
+}
+
 async function fetchDaily(symbol: string, tradeDate: string): Promise<Record<string, any> | null> {
     await tushareQuoteThrottler.throttle();
     const rows = await tushareRequest('daily', {
@@ -43,13 +66,32 @@ async function fetchDaily(symbol: string, tradeDate: string): Promise<Record<str
     return rows.length > 0 ? rows[0] : null;
 }
 
-async function fetchDailyMultiDate(symbol: string, startDate: string, endDate: string): Promise<Record<string, any>[]> {
+async function fetchRecentDaily(symbol: string, tradeDate: string, count: number): Promise<Record<string, any>[]> {
     await tushareQuoteThrottler.throttle();
-    return tushareRequest('daily', {
+    const rows = await tushareRequest('daily', {
         ts_code: toTsCode(symbol),
-        start_date: startDate,
-        end_date: endDate,
+        end_date: tradeDate,
     });
+    if (!rows || rows.length === 0) return [];
+    const sorted = rows.sort((a: Record<string, any>, b: Record<string, any>) =>
+        String(b.trade_date || '').localeCompare(String(a.trade_date || ''))
+    );
+    return sorted.slice(0, count);
+}
+
+async function calcVolumeRatio(symbol: string, tradeDate: string, todayVol: number): Promise<number | null> {
+    if (todayVol <= 0) return null;
+    try {
+        const recentRows = await fetchRecentDaily(symbol, tradeDate, 6);
+        if (recentRows.length < 2) return null;
+        const pastRows = recentRows.slice(1);
+        if (pastRows.length === 0) return null;
+        const avgVol = pastRows.reduce((sum: number, r: Record<string, any>) => sum + (Number(r.vol) || 0), 0) / pastRows.length;
+        if (avgVol <= 0) return null;
+        return Math.round((todayVol / avgVol) * 100) / 100;
+    } catch {
+        return null;
+    }
 }
 
 export class TushareQuoteService {
@@ -62,16 +104,16 @@ export class TushareQuoteService {
         const basic = basicRow.length > 0 ? basicRow[0] : null;
 
         if (!dailyRow) {
-            const fallbackDate = getRecentTradeDate();
-            if (fallbackDate !== tradeDate) {
-                const fallback = await fetchDaily(symbol, fallbackDate);
-                if (!fallback) throw new Error(`Tushare行情接口无数据: ${symbol}`);
-                return this.buildQuote(symbol, fallback, basic, level);
-            }
             throw new Error(`Tushare行情接口无数据: ${symbol}`);
         }
 
-        return this.buildQuote(symbol, dailyRow, basic, level);
+        let volumeRatio: number | null = null;
+        if (level === 'activity') {
+            const todayVol = Number(dailyRow.vol) || 0;
+            volumeRatio = await calcVolumeRatio(symbol, tradeDate, todayVol);
+        }
+
+        return this.buildQuote(symbol, dailyRow, basic, level, volumeRatio);
     }
 
     private static buildQuote(
@@ -79,6 +121,7 @@ export class TushareQuoteService {
         daily: Record<string, any>,
         basic: Record<string, any> | null,
         level: QuoteLevel,
+        volumeRatio: number | null,
     ): Record<string, any> {
         const preClose = Number(daily.pre_close) || 0;
         const close = Number(daily.close) || 0;
@@ -89,6 +132,8 @@ export class TushareQuoteService {
         const high = Number(daily.high) || 0;
         const low = Number(daily.low) || 0;
         const open = Number(daily.open) || 0;
+        const turnover = Number(daily.turnover) || 0;
+        const { limitUp, limitDown } = calcLimitPrice(preClose, symbol);
 
         const result: Record<string, any> = {
             '股票代码': symbol,
@@ -112,7 +157,12 @@ export class TushareQuoteService {
             result['成交量'] = vol * 100;
             result['成交额'] = amount * 1000;
             result['振幅'] = preClose > 0 ? Math.round(((high - low) / preClose) * 10000) / 100 : 0;
-            result['换手率'] = Number(daily.turnover) || 0;
+            result['换手率'] = turnover > 0 ? turnover : null;
+            result['量比'] = volumeRatio;
+            result['涨停价'] = limitUp;
+            result['跌停价'] = limitDown;
+            result['外盘'] = null;
+            result['内盘'] = null;
             result['更新时间'] = daily.trade_date || '';
             return result;
         }
@@ -122,7 +172,7 @@ export class TushareQuoteService {
             result['市净率'] = basic?.pb ?? null;
             result['总市值'] = basic?.total_mv ? Math.round(basic.total_mv * 10000) : null;
             result['流通市值'] = basic?.circ_mv ? Math.round(basic.circ_mv * 10000) : null;
-            result['换手率'] = Number(daily.turnover) || 0;
+            result['换手率'] = turnover > 0 ? turnover : null;
             result['成交量'] = vol * 100;
             result['成交额'] = amount * 1000;
             result['昨收价'] = preClose;
